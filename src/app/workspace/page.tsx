@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
 type PanelType = "ar" | "calibracion" | "perspectiva" | "cuadricula" | null;
@@ -46,6 +47,47 @@ export default function Workspace() {
         setPanelActivo((prev) => (prev === panel ? null : panel));
     };
 
+    // ==========================================
+    // LECTOR DE PROYECTOS GUARDADOS
+    // ==========================================
+    const searchParams = useSearchParams();
+    const projectId = searchParams.get("id");
+
+    useEffect(() => {
+        if (projectId) {
+            cargarProyectoDesdeBD(projectId);
+        }
+    }, [projectId]);
+
+    const cargarProyectoDesdeBD = async (id: string) => {
+        try {
+            const { data, error } = await supabase
+                .from("proyectos")
+                .select("*")
+                .eq("id", id)
+                .single();
+
+            if (error) throw error;
+
+            if (data) {
+                setImagenUrl(data.imagen_url);
+                setEscala(data.escala);
+                setTamanoCuadricula(data.tamano_cuadricula);
+
+                // NUEVO: Cargamos los estados de las demás herramientas
+                setRotacionX(data.rotacion_x);
+                setRotacionY(data.rotacion_y);
+                setModoCuadricula(data.modo_cuadricula);
+                setFiltroActivo(data.filtro_activo);
+
+                const fakeFile = new File([""], "nube.jpg", { type: "image/jpeg" });
+                setArchivoOriginal(fakeFile);
+            }
+        } catch (error) {
+            console.error("Error al cargar el proyecto:", error);
+        }
+    };
+
     const manejarSubida = (evento: React.ChangeEvent<HTMLInputElement>) => {
         const archivo = evento.target.files?.[0];
         if (!archivo) return;
@@ -61,41 +103,75 @@ export default function Workspace() {
         setPanelActivo(null);
     };
 
+    // ==========================================
+    // GUARDAR O ACTUALIZAR PROYECTO
+    // ==========================================
     const guardarProyecto = async () => {
-        if (!archivoOriginal) return alert("Sube un plano primero.");
+        if (!imagenUrl) return alert("Sube o abre un plano primero.");
         setGuardando(true);
 
         try {
-            // 1. Obtener usuario
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error("Debes iniciar sesión");
 
-            // 2. Subir imagen a Storage
-            const nombreArchivo = `${user.id}-${Date.now()}`;
-            const { error: uploadError } = await supabase.storage
-                .from('planos')
-                .upload(nombreArchivo, archivoOriginal);
+            let urlFinal = imagenUrl;
 
-            if (uploadError) throw uploadError;
+            if (archivoOriginal && archivoOriginal.name !== "nube.jpg") {
+                const extension = archivoOriginal.name.split('.').pop() || "jpg";
+                const nombreArchivo = `${user.id}-${Date.now()}.${extension}`;
+                const { error: uploadError } = await supabase.storage
+                    .from('planos')
+                    .upload(nombreArchivo, archivoOriginal);
 
-            // 3. Obtener URL pública
-            const { data: { publicUrl } } = supabase.storage
-                .from('planos')
-                .getPublicUrl(nombreArchivo);
+                if (uploadError) throw uploadError;
 
-            // 4. Guardar datos en la tabla
-            const { error: dbError } = await supabase
-                .from('proyectos')
-                .insert({
-                    user_id: user.id,
-                    imagen_url: publicUrl,
-                    escala: escala,
-                    tamano_cuadricula: tamanoCuadricula
-                });
+                const { data: { publicUrl } } = supabase.storage
+                    .from('planos')
+                    .getPublicUrl(nombreArchivo);
 
-            if (dbError) throw dbError;
+                urlFinal = publicUrl;
+            }
 
-            alert("¡Proyecto guardado en la nube!");
+            if (projectId) {
+                // ACTUALIZAR PROYECTO EXISTENTE
+                const { error: dbError } = await supabase
+                    .from('proyectos')
+                    .update({
+                        escala: escala,
+                        tamano_cuadricula: tamanoCuadricula,
+                        imagen_url: urlFinal,
+                        // NUEVO: Guardamos los nuevos parámetros
+                        rotacion_x: rotacionX,
+                        rotacion_y: rotacionY,
+                        modo_cuadricula: modoCuadricula,
+                        filtro_activo: filtroActivo
+                    })
+                    .eq('id', projectId);
+
+                if (dbError) throw dbError;
+                alert("¡Cambios actualizados correctamente!");
+            } else {
+                // CREAR NUEVO PROYECTO
+                if (!archivoOriginal || archivoOriginal.name === "nube.jpg") {
+                    throw new Error("No hay imagen válida para subir.");
+                }
+                const { error: dbError } = await supabase
+                    .from('proyectos')
+                    .insert({
+                        user_id: user.id,
+                        imagen_url: urlFinal,
+                        escala: escala,
+                        tamano_cuadricula: tamanoCuadricula,
+                        // NUEVO: Guardamos los nuevos parámetros
+                        rotacion_x: rotacionX,
+                        rotacion_y: rotacionY,
+                        modo_cuadricula: modoCuadricula,
+                        filtro_activo: filtroActivo
+                    });
+
+                if (dbError) throw dbError;
+                alert("¡Proyecto nuevo guardado en la nube!");
+            }
         } catch (error: any) {
             alert("Error: " + error.message);
         } finally {
@@ -154,9 +230,6 @@ export default function Workspace() {
         }
     };
 
-    // =========================
-    // FIX TYPESCRIPT (Uso de 'any' para window)
-    // =========================
     const alternarVoz = () => {
         if (escuchando) {
             recognitionRef.current?.stop();
@@ -164,7 +237,7 @@ export default function Workspace() {
             return;
         }
 
-        const w = window as any; // <- FIX TYPESCRIPT AQUÍ
+        const w = window as any;
         const SpeechRecognition = w.SpeechRecognition || w.webkitSpeechRecognition;
 
         if (!SpeechRecognition) {
@@ -259,7 +332,7 @@ export default function Workspace() {
             )}
 
             <aside className="w-16 bg-slate-800 border-r border-slate-700 flex flex-col items-center py-4 gap-6 shadow-xl z-50 relative">
-                <Link href="/" className="p-2 bg-slate-700 rounded-xl">🏠</Link>
+                <Link href="/dashboard" className="p-2 bg-slate-700 rounded-xl hover:bg-slate-600 transition-colors" title="Mis Proyectos">📂</Link>
                 <div className="w-8 h-px bg-slate-700" />
                 <button onClick={activarModoRoca} className="p-3 rounded-xl bg-slate-700 hover:bg-blue-600">🪨</button>
                 <button onClick={alternarVoz} className={`p-3 rounded-xl ${escuchando ? 'bg-red-600 animate-pulse' : 'bg-slate-700 hover:bg-red-600'}`}>🎤</button>
@@ -323,7 +396,7 @@ export default function Workspace() {
                     <>
                         <video ref={videoRef} autoPlay playsInline className={`absolute inset-0 w-full h-full object-cover ${modoAR ? "block" : "hidden"}`} />
 
-                        {/* NUEVO: CRUZ DE GUÍA (Crosshair) PARA PAPELOTES */}
+                        {/* CRUZ DE GUÍA PARA PAPELOTES */}
                         {modoCuadricula && (
                             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none opacity-80">
                                 <div className="w-6 h-px bg-red-500 absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2"></div>

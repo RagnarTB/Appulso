@@ -27,7 +27,7 @@ export default function Login() {
             setMensaje({ texto: "Error: Credenciales incorrectas.", tipo: "error" });
         } else {
             setMensaje({ texto: "¡Ingreso exitoso! Redirigiendo...", tipo: "exito" });
-            router.push("/workspace"); // Si todo sale bien, lo enviamos a la Mesa de Trabajo
+            router.push("/dashboard"); // Si todo sale bien, lo enviamos a la Mesa de Trabajo
         }
         setCargando(false);
     };
