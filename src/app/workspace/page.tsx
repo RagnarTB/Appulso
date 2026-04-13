@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/supabase"; // Ajusta esta ruta a '../lib/supabase' si te da error local
 
 type PanelType = "ar" | "calibracion" | "perspectiva" | "cuadricula" | null;
 
-export default function Workspace() {
+// Le quitamos el "export default" y la llamamos WorkspaceContent
+function WorkspaceContent() {
     const [imagenUrl, setImagenUrl] = useState<string | null>(null);
     const [archivoOriginal, setArchivoOriginal] = useState<File | null>(null);
     const [guardando, setGuardando] = useState(false);
@@ -47,9 +48,6 @@ export default function Workspace() {
         setPanelActivo((prev) => (prev === panel ? null : panel));
     };
 
-    // ==========================================
-    // LECTOR DE PROYECTOS GUARDADOS
-    // ==========================================
     const searchParams = useSearchParams();
     const projectId = searchParams.get("id");
 
@@ -73,8 +71,6 @@ export default function Workspace() {
                 setImagenUrl(data.imagen_url);
                 setEscala(data.escala);
                 setTamanoCuadricula(data.tamano_cuadricula);
-
-                // NUEVO: Cargamos los estados de las demás herramientas
                 setRotacionX(data.rotacion_x);
                 setRotacionY(data.rotacion_y);
                 setModoCuadricula(data.modo_cuadricula);
@@ -103,9 +99,6 @@ export default function Workspace() {
         setPanelActivo(null);
     };
 
-    // ==========================================
-    // GUARDAR O ACTUALIZAR PROYECTO
-    // ==========================================
     const guardarProyecto = async () => {
         if (!imagenUrl) return alert("Sube o abre un plano primero.");
         setGuardando(true);
@@ -133,14 +126,12 @@ export default function Workspace() {
             }
 
             if (projectId) {
-                // ACTUALIZAR PROYECTO EXISTENTE
                 const { error: dbError } = await supabase
                     .from('proyectos')
                     .update({
                         escala: escala,
                         tamano_cuadricula: tamanoCuadricula,
                         imagen_url: urlFinal,
-                        // NUEVO: Guardamos los nuevos parámetros
                         rotacion_x: rotacionX,
                         rotacion_y: rotacionY,
                         modo_cuadricula: modoCuadricula,
@@ -151,7 +142,6 @@ export default function Workspace() {
                 if (dbError) throw dbError;
                 alert("¡Cambios actualizados correctamente!");
             } else {
-                // CREAR NUEVO PROYECTO
                 if (!archivoOriginal || archivoOriginal.name === "nube.jpg") {
                     throw new Error("No hay imagen válida para subir.");
                 }
@@ -162,7 +152,6 @@ export default function Workspace() {
                         imagen_url: urlFinal,
                         escala: escala,
                         tamano_cuadricula: tamanoCuadricula,
-                        // NUEVO: Guardamos los nuevos parámetros
                         rotacion_x: rotacionX,
                         rotacion_y: rotacionY,
                         modo_cuadricula: modoCuadricula,
@@ -331,7 +320,7 @@ export default function Workspace() {
                 </div>
             )}
 
-            <aside className="w-16 bg-slate-800 border-r border-slate-700 flex flex-col items-center py-4 gap-6 shadow-xl z-50 relative">
+            <aside className="w-16 bg-slate-800 border-r border-slate-700 flex flex-col items-center py-4 gap-6 shadow-xl z-50 relative overflow-y-auto">
                 <Link href="/dashboard" className="p-2 bg-slate-700 rounded-xl hover:bg-slate-600 transition-colors" title="Mis Proyectos">📂</Link>
                 <div className="w-8 h-px bg-slate-700" />
                 <button onClick={activarModoRoca} className="p-3 rounded-xl bg-slate-700 hover:bg-blue-600">🪨</button>
@@ -396,7 +385,6 @@ export default function Workspace() {
                     <>
                         <video ref={videoRef} autoPlay playsInline className={`absolute inset-0 w-full h-full object-cover ${modoAR ? "block" : "hidden"}`} />
 
-                        {/* CRUZ DE GUÍA PARA PAPELOTES */}
                         {modoCuadricula && (
                             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none opacity-80">
                                 <div className="w-6 h-px bg-red-500 absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2"></div>
@@ -445,5 +433,19 @@ export default function Workspace() {
                 )}
             </main>
         </div>
+    );
+}
+
+// ESTA ES LA MAGIA DE SUSPENSE QUE EXPORTA TU APP A VERCEL
+export default function Workspace() {
+    return (
+        <Suspense fallback={
+            <div className="flex h-screen items-center justify-center bg-slate-900 text-white flex-col gap-4">
+                <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                <p className="font-semibold animate-pulse">Cargando Mesa de Trabajo...</p>
+            </div>
+        }>
+            <WorkspaceContent />
+        </Suspense>
     );
 }
